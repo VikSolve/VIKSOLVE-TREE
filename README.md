@@ -1,144 +1,206 @@
-# README
+# Dynamic 2D Rectangle Add / Rectangle Sum (Online, Sparse, O(log^2 U))
 
-- [PL — Opis rozwiązania](#opis-rozwiazania-pl)
-- [EN — Solution description](#solution-description-en)
+Implementacja struktury danych do operacji na bardzo dużej (rzadkiej) siatce 2D:
 
-# Opis rozwiązania (PL)
+- Update: dodaj wartość `v` do wszystkich punktów w prostokącie `[x1, x2] x [y1, y2]`
+- Query: oblicz sumę wartości w prostokącie `[x1, x2] x [y1, y2]`
 
-## Założenia
-1) Prostokąt (x1, y1, x2, y2) rozumiemy jako prostokąt osiowo-równoległy, którego **lewy dolny** róg jest w punkcie (x1, y1), a **prawy górny** w (x2, y2).  
-2) L <= x1, y1, x2, y2 <= R. Definiujemy M = (R - L + 1). Dla uproszczenia implementacji zakładamy, że M = 2^k dla pewnego k ∈ N.
-
-## Problem
-Chcemy online obsługiwać operacje:
-1) **Update:** dodaj (lub odejmij) wartość `val` na prostokącie [x1..x2] × [y1..y2].  
-2) **Query:** podaj **sumę** wartości na prostokącie [x1..x2] × [y1..y2].
-
-## Złożoność
-Rozwiązanie działa w złożoności czasowej i pamięciowej:
-O(Q * (log2 M)^2),
-gdzie Q to liczba operacji, czyli O((log2 M)^2) na pojedynczą operację.
-
-## Idea
-Utrzymujemy dynamiczne drzewo przedziałowe T na osi **X** dla zakresu [L, R].  
-Każdy wierzchołek v drzewa T reprezentuje przedział [l, r] na osi X i przechowuje:
-
-1) Dynamiczne drzewo przedziałowe **`sgtree`** na osi **Y**.  
-   Przechowuje ono te aktualizacje, które podczas update’u na osi X **zatrzymały się** w v (tzn. [l, r] jest w całości w [x1, x2], więc nie schodzimy do dzieci).  
-   Wtedy wykonujemy:
-   - `sgtree.add(y1, y2, val)`.
-
-2) Dynamiczne drzewo przedziałowe **`sum`** na osi **Y**.  
-   Aktualizujemy je dla każdego odwiedzanego węzła v, gdy [l, r] przecina [x1, x2]. Dodajemy na [y1, y2] wartość:
-   - `val * overlap`,
-   gdzie:
-   - `overlap = liczba elementów w części wspólnej [l, r] i [x1, x2]`
-     (czyli overlap = max(0, min(r, x2) - max(l, x1) + 1)).
-
-3) Wskaźnik na lewe dziecko (może nie istnieć).  
-4) Wskaźnik na prawe dziecko (może nie istnieć).
+Struktura działa online (operacje napływają dynamicznie), bez kompresji współrzędnych i bez alokacji pełnej tablicy `U x U`.
 
 ---
 
-## UPDATE (x1, y1, x2, y2, val)
-Startujemy w korzeniu. Dla węzła v reprezentującego [l, r]:
+## 1) Model problemu
 
-1) Liczymy `overlap` i wykonujemy:
-   - `v.sum.add(y1, y2, val * overlap)`.
+Utrzymujemy funkcję `A(x, y)` na dyskretnej domenie:
+- `x, y` są całkowite i należą do `[L, R]`.
 
-2) Jeśli [l, r] jest w całości w [x1, x2], to:
-   - `v.sgtree.add(y1, y2, val)`,
-   - kończymy rekurencję w tym węźle.
+Operacje:
 
-3) W przeciwnym razie schodzimy do dzieci:
-   - jeśli x1 <= floor((l+r)/2), wywołujemy update w lewym dziecku dla [l, floor((l+r)/2)],
-   - jeśli floor((l+r)/2) < x2, wywołujemy update w prawym dziecku dla [floor((l+r)/2)+1, r].
+1. `ADD(x1, y1, x2, y2, v)`
+   - dla każdego `(x, y)` z prostokąta `[x1, x2] x [y1, y2]`:
+   - `A(x, y) = A(x, y) + v`
 
----
+2. `SUM(x1, y1, x2, y2)`
+   - zwraca:
+   - `sum_{x=x1..x2} sum_{y=y1..y2} A(x, y)`
 
-## QUERY (x1, y1, x2, y2)
-Startujemy w korzeniu. Dla węzła v reprezentującego [l, r]:
-
-1) Jeśli [l, r] jest w całości w [x1, x2], zwracamy:
-   - `v.sum.query(y1, y2)`.
-
-2) W przeciwnym razie (częściowe pokrycie):
-   - ustawiamy `result = 0`,
-   - liczymy `overlap`,
-   - dodajemy wkład z aktualizacji „zatrzymanych” w v:
-     - `result += overlap * v.sgtree.query(y1, y2)`,
-   - następnie dodajemy wyniki z dzieci (jeśli istnieją):
-     - jeśli x1 <= floor((l+r)/2), schodzimy do lewego dziecka,
-     - jeśli floor((l+r)/2) < x2, schodzimy do prawego dziecka,
-   - zwracamy `result`.
+Zakładamy: `x1 <= x2`, `y1 <= y2`.
 
 ---
 
-# Solution description (EN)
+## 2) Idea struktury
 
-## Assumptions
-1) A rectangle (x1, y1, x2, y2) is an axis-aligned rectangle with the **bottom-left** corner at (x1, y1) and the **top-right** corner at (x2, y2).  
-2) L <= x1, y1, x2, y2 <= R. Let M = (R - L + 1). For implementation convenience we assume M = 2^k for some k in N.
+### 2.1 Zewnętrzne drzewo segmentowe po osi X
 
-## Problem
-We want to support online operations:
-1) **Update:** add (or subtract) a value `val` on the rectangle [x1..x2] × [y1..y2].  
-2) **Query:** return the **sum** on the rectangle [x1..x2] × [y1..y2].
+Budujemy dynamiczne drzewo segmentowe po `x`.
+Każdy węzeł `v` reprezentuje przedział `X_v = [l_v, r_v]`.
 
-## Complexity
-Time and memory complexity:
-O(Q * (log2 M)^2),
-where Q is the number of operations, i.e. O((log2 M)^2) per operation.
+### 2.2 W każdym węźle X: dwa dynamiczne drzewa po osi Y
 
-## Idea
-We maintain a dynamic segment tree T on the **X** axis over the range [L, R].  
-Each node v of T represents an X-interval [l, r] and stores:
+Dla każdego węzła `v` trzymamy dwie niezależne struktury 1D (range add / range sum) po `y`:
 
-1) A dynamic segment tree **`sgtree`** on the **Y** axis.  
-   It stores updates that, during the X-segtree update, **stop** at v (i.e. [l, r] is fully inside [x1, x2], so we do not go to v's children).  
-   Then we perform:
-   - `sgtree.add(y1, y2, val)`.
+- `local[v]` — lokalne update'y zakotwiczone w `v`
+- `agg[v]` — agregacja wkładu update'ów do CAŁEGO przedziału `X_v`
 
-2) A dynamic segment tree **`sum`** on the **Y** axis.  
-   We update it for every visited node v whenever [l, r] intersects [x1, x2]. We add on [y1, y2] the value:
-   - `val * overlap`,
-   where:
-   - `overlap = the number of integers in the intersection of [l, r] and [x1, x2]`
-     (i.e. overlap = max(0, min(r, x2) - max(l, x1) + 1)).
-
-3) A pointer to the left child (may not exist).  
-4) A pointer to the right child (may not exist).
+Wewnętrzna struktura 1D to klasyczny dynamiczny segment tree z lazy propagation:
+- `range_add(y1, y2, delta)`
+- `range_sum(y1, y2)`
 
 ---
 
-## UPDATE (x1, y1, x2, y2, val)
-We start at the root. For a node v representing [l, r]:
+## 3) Definicje formalne i niezmienniki
 
-1) Compute `overlap` and do:
-   - `v.sum.add(y1, y2, val * overlap)`.
+Niech `U_v` oznacza zbiór update'ów zakotwiczonych w węźle `v`
+(tzn. update pokrywa `X_v` w całości, ale na poziomie rodzica nie było już pełnego pokrycia).
 
-2) If [l, r] is fully inside [x1, x2], then:
-   - `v.sgtree.add(y1, y2, val)`,
-   - stop recursion at this node.
+Dla każdego węzła `v` utrzymujemy:
 
-3) Otherwise, recurse to children:
-   - if x1 <= floor((l+r)/2), recurse to the left child for [l, floor((l+r)/2)],
-   - if floor((l+r)/2) < x2, recurse to the right child for [floor((l+r)/2)+1, r].
+### Niezmiennik I (znaczenie `local[v]`)
+
+Dla dowolnego przedziału `Y = [a, b]`:
+
+`local[v].sum(Y) = sum_{u in U_v} ( val(u) * |Y ∩ Y_u| )`
+
+gdzie:
+- `val(u)` = wartość update'u `u`
+- `Y_u = [y1^u, y2^u]`
+
+Interpretacja:
+- to wkład "na jeden punkt x" należący do `X_v`.
+
+### Niezmiennik II (znaczenie `agg[v]`)
+
+Dla dowolnego `Y = [a, b]`:
+
+`agg[v].sum(Y) = sum_{u in U_v} ( val(u) * |X_v| * |Y ∩ Y_u| )`
+
+Interpretacja:
+- to wkład update'ów zakotwiczonych w `v` do całego prostokąta `X_v x Y`.
+
+### Niezmiennik III (dekompozycja zapytania częściowego)
+
+Jeśli zapytanie po `x`, czyli `Qx = [x1, x2]`, przecina `X_v` częściowo, to:
+
+`ans(v) = |Qx ∩ X_v| * local[v].sum(Qy) + ans(left(v)) + ans(right(v))`
+
+Jeśli `X_v` jest w całości zawarte w `Qx`, to zwracamy:
+
+`agg[v].sum(Qy)`
 
 ---
 
-## QUERY (x1, y1, x2, y2)
-We start at the root. For a node v representing [l, r]:
+## 4) Operacja update: ADD
 
-1) If [l, r] is fully inside [x1, x2], return:
-   - `v.sum.query(y1, y2)`.
+Dla `ADD(x1, y1, x2, y2, val)` w odwiedzanym węźle `v`, z `X_v = [l_v, r_v]`:
 
-2) Otherwise (partial overlap):
-   - set `result = 0`,
-   - compute `overlap`,
-   - add the contribution from updates that stopped at v:
-     - `result += overlap * v.sgtree.query(y1, y2)`,
-   - then add results from children (if they exist):
-     - if x1 <= floor((l+r)/2), go to the left child,
-     - if floor((l+r)/2) < x2, go to the right child,
-   - return `result`.
+1. Policz:
+   - `ov_x = |X_v ∩ [x1, x2]|`
+
+2. Zawsze zaktualizuj:
+   - `agg[v].range_add(y1, y2, val * ov_x)`
+
+3. Jeśli `X_v` jest całe w `[x1, x2]`, to dodatkowo:
+   - `local[v].range_add(y1, y2, val)`
+   - i STOP (nie schodzimy do dzieci)
+
+4. W przeciwnym razie:
+   - schodzimy rekurencyjnie do przecinających dzieci.
+
+Dlaczego w kroku 2 jest mnożnik `ov_x`?
+- Bo `agg[v]` przechowuje sumę po wszystkich `x` z `X_v`, a nie "na pojedynczy x".
+
+---
+
+## 5) Operacja query: SUM
+
+Dla `SUM(x1, y1, x2, y2)` w węźle `v`:
+
+1. Jeśli brak przecięcia z `[x1, x2]`:
+   - zwróć `0`
+
+2. Jeśli `X_v` jest całe w `[x1, x2]`:
+   - zwróć `agg[v].sum(y1, y2)`
+
+3. W przeciwnym razie:
+   - `ov_x = |X_v ∩ [x1, x2]|`
+   - `here = ov_x * local[v].sum(y1, y2)`
+   - zwróć `here + query(left) + query(right)`
+
+To dokładnie realizuje Niezmiennik III.
+
+---
+
+## 6) Szkic dowodu poprawności
+
+Dowód przez indukcję po:
+- strukturze drzewa `x`
+- liczbie wykonanych operacji.
+
+### Krok bazowy
+Bez update'ów wszystkie struktury są puste, więc wszystkie sumy = 0.
+Niezmienniki I–III zachodzą trywialnie.
+
+### Krok indukcyjny: update
+Dla nowego update'u `U`:
+- w każdym odwiedzonym `v`, `agg[v]` dostaje dokładnie `val * |X_v ∩ X_U|` na odpowiednim przedziale `y`,
+  więc wkład do całego `X_v x Y` jest poprawny (Niezmiennik II),
+- jeśli `X_v` jest całe w `X_U`, update kotwiczy się w `v`, więc `local[v]` dostaje `val` na `Y_U`
+  (Niezmiennik I),
+- przy niepełnym pokryciu update schodzi do dzieci; rozłączność podprzedziałów dzieci
+  eliminuje podwójne liczenie.
+
+### Krok indukcyjny: query
+- pełne pokrycie: `agg[v]` zwraca dokładną sumę po `X_v x Qy` (Niezmiennik II),
+- częściowe pokrycie:
+  - wkład lokalny to `|Qx ∩ X_v| * local[v].sum(Qy)`,
+  - resztę dają dzieci (Niezmiennik III).
+Suma daje dokładny wynik.
+
+---
+
+## 7) Złożoność
+
+Niech:
+- `U = R - L + 1` (rozmiar osi),
+- `Q` = liczba operacji.
+
+Mamy:
+- wysokość dynamicznego drzewa po `x`: `O(log U)`,
+- w każdym odwiedzonym węźle jedna operacja 1D po `y`: `O(log U)`.
+
+Stąd:
+- czas `ADD`: `O(log^2 U)`
+- czas `SUM`: `O(log^2 U)`
+
+Pamięć:
+- zależy od liczby faktycznie utworzonych węzłów (sparse),
+- typowo do `O(Q log^2 U)` w pesymistycznym przypadku.
+
+---
+
+## 8) Wymagania implementacyjne i pułapki
+
+1. Clamp przecięcia:
+   - licz długość przecięcia jako:
+   - `ov([a,b],[c,d]) = max(0, min(b,d) - max(a,c) + 1)`
+
+2. Duże liczby:
+   - używaj co najmniej 128-bitów (`__int128`) dla sum i iloczynów typu:
+   - `val * ov_x * ov_y`
+
+3. Spójne indeksowanie:
+   - trzymaj domenę domkniętą `[L, R]`
+   - długość segmentu: `len = r - l + 1`
+
+4. Wczesne wyjścia:
+   - brak przecięcia kończy rekurencję natychmiast.
+
+---
+
+## 9) Kiedy używać tej struktury
+
+Używaj, gdy:
+- zakres współrzędnych jest bardzo duży (np. do `2^31` albo więcej),
+- dane są rzadkie (nie chcesz alokować pełnej macierzy),
+- operacje są online (naprzemienne update/query),
+- potrzebujesz dokładnych sum prostokątów po prostokątnych modyfikacjach.
